@@ -1,0 +1,141 @@
+---
+title: "STA130 Capstone Project"
+authors: Annabelle An, Betty Li, Edric Shi, Thomas Li
+date: "2023-03-10"
+output:
+  pdf_document: default
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+```
+
+```{r, message=FALSE}
+install.packages("arrow")
+library(arrow)
+library(tidyverse)
+```
+
+```{r}
+# The location is the file location in our own laptop
+df <- read_parquet("/Users/thomas/Downloads/Galaxy Zoo/nsa_v1_0_1_key_cols.parquet")
+glimpse(df)
+```
+
+Research question #1:
+Is the true mean of galaxies’ redshift 0.08?
+
+## Statistical methods
+- One-sample hypothesis testing
+$$H_0: \mu_{redshift} = 0.08$$
+$$H_A: \mu_{redshift} \neq 0.08$$
+
+- The variable that has been chosen for this question is `redshift``, which represents the measured redshift to an external site. of the galaxy, which is related to how far away that galaxy is from us.
+
+```{r}
+redshift_data <- df %>%
+  summarise(mean = mean(redshift), median = median(redshift),max = max(redshift),sd = sd(redshift))
+redshift_data
+
+```
+
+```{r}
+df %>%
+  ggplot(aes(x=redshift))+ 
+  geom_boxplot(fill = "grey")
+```
+
+Research question #2:
+What is the 95% confidence interval of that the estimate of the galaxy's size where 50% of the light is within the radius and 50% of the light is outside of the radius of small and large galaxies are the same?
+
+```{r}
+df <- df %>% 
+  mutate(size = ifelse(petro_theta <= quantile(petro_theta, 0.5), "Small", "Large"))
+df %>% ggplot(aes(x = size, y = petro_th50)) + 
+  geom_boxplot() +
+  labs(x = "the sizes for the galaxies", y = "the galaxy's size where 50% of the light is within the radius", title = "Galaxy's size where 50% of the light is within the radius for different galaxies")
+```
+## Statistical methods
+- Two sample hypothesis testing
+$$H_0: M_{small} = M_{large}$$
+$$H_A: M_{small} \neq M_{large}$$
+
+- where $M_{small}$ is median for the estimate of the galaxy's size where 50% of the light is within the radius and 50% of the light is outside of the radius of small galaxies, and $M_{large}$ is median for the estimate of the galaxy's size where 50% of the light is within the radius and 50% of the light is outside of the radius of large galaxies.
+
+- The variable that has been chosen for this question is `petro_th50`, which represents an estimate of the galaxy's size where 50% of the light is within the radius and 50% of the light is outside of the radius.
+```{r}
+df_1 <- df %>% 
+  filter(size == "Small" | size == "Large") %>% 
+  filter(!is.na(petro_th50))
+
+test_stat <- df_1 %>% group_by(size) %>%
+  summarise(medians = median(petro_th50)) %>%
+  summarise(value = diff(medians))
+test_stat <- as.numeric(test_stat)
+test_stat
+
+set.seed(1000)
+reps <- 1000
+simulated_diff <- rep(NA, reps)
+for (i in 1:reps){
+  diff <- df_1 %>%
+    mutate(size = sample(size)) %>%
+    group_by(size) %>%
+    summarise(medians = median(petro_th50)) %>%
+    summarise(diff(medians))
+  simulated_diff[i] <- as.numeric(diff)
+}
+sim <- tibble(median_diff = simulated_diff)
+sim %>% ggplot(aes(x = median_diff)) + 
+  geom_histogram(bins = 30, color = "black", fill = "grey") 
+num_more_extreme <- sim %>% 
+  filter(abs(median_diff) >= abs(test_stat)) %>% summarise(n())
+p_value <- as.numeric(num_more_extreme / reps)
+p_value
+```
+
+```{r}
+#calculating confidence interval
+quantile(simulated_diff, probs = c(0.025, 0.975))
+```
+
+
+Research question #3:
+Are the medians of the galaxies’ apparent brightness using sersic_nmygy_r data and the galaxies’ apparent brightness using mag_r data the same? 
+
+## Statistical methods
+- Two sample hypothesis testing
+$$H_0: M_{sersic} = M_{mag}$$
+$$H_A: M_{sersic} \neq M_{mag}$$
+
+- where $M_{sersic}$ is median for median of the galaxies’ apparent brightness using sersic_nmygy_r data, and $M_{mag}$ median of the galaxies’ apparent brightness using mag_r data.
+
+- The variables that have been chosen for this question are `sersic_nmygy_r` and `mag_r`.`sersic_nmygy_r` represents an estimate used to estimate the galaxy's apparent brightness (which depends on how far away it is) in units of magnitudes; `mag_r` represents an alternative estimate of the galaxy's apparent brightness in units of magnitude.
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2, fig.width=4, fig.align='center'}
+set.seed(123) 
+n <- 641409
+repetitions <- 1000
+sim20 <- rep(NA, repetitions)
+ser_df <- df %>% filter(!is.na(sersic_nmgy_r))
+mag_df <- df %>% filter(!is.na(mag_r))
+median_1 <- median(as.numeric(ser_df$sersic_nmgy_r))
+median_2 <- median(as.numeric(mag_df$mag_r))
+test_stat <- median_1 - median_2
+test_stat
+
+for (i in 1:repetitions)
+{
+sim_diff <- median_2 - median_1
+shuffled_xs <- sample(c(df$sersic_nmgy_r, df$mag_r), size = 100, replace = TRUE)
+tmp <- median(shuffled_xs[1:50]) - median(shuffled_xs[51:100])
+sim20[i] <- tmp
+}
+sim20 <- tibble(medians=sim20)
+sim20 %>% ggplot(aes(x=medians))+geom_histogram(bins=30, colour="black",fill="grey")+labs(x="median_diff", y="galaxy's apparent brightness by two methods")
+``` 
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2, fig.width=4, fig.align='center'}
+p_value <- tibble(sim20) %>% filter(sim20 >= abs(test_stat) | sim20 <= -abs(test_stat)) %>% summarise(p_value = n()/repetitions)
+
+tibble(sim20) %>% filter(abs(medians) >= abs(test_stat)) %>% summarise(p_value = n()/repetitions)
+
+```
+
